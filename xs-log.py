@@ -72,6 +72,7 @@ class XS_stat:
         df_period = df_con.groupby(["Ticker", "Name"]).sum().reset_index()
         df_period["Sum"] = df_period.sum(axis=1)
         df_period[df_period.eq(0)] = np.nan
+        df_period = df_period.sort_values(["Sum", "Ticker"], ascending=[False, True])
         return df_period
 
     def process(self):
@@ -105,7 +106,7 @@ class XS_stat:
         df_con = pd.concat(dfs, sort=False, ignore_index=True)
         df_con = df_con.sort_values(["Ticker", "Date"], ascending=[True, True])
 
-        periods = [5, 20, 60]
+        periods = [1, 5, 20, 60]
 
         mkdirs(self.concat_dir)
         self.concat_path = "{}/{}_xs_stat.xlsx".format(self.concat_dir, self.date_last)
