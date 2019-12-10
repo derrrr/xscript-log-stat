@@ -30,23 +30,33 @@ def path_leaf(path):
     head, tail = ntpath.split(path)
     return tail or ntpath.basename(head)
 
+def get_encoding(path):
+    with open(path, "rb") as ef:
+        file_encoding = detect(ef.read())["encoding"]
+        if file_encoding.lower() == "big5":
+            file_encoding = "cp950"
+    return file_encoding
+
+def convert_encoding(file_path, output_encoding):
+    input_encoding = get_encoding(file_path)
+    temp_path = "{}.tmp".format(file_path)
+    with open(file_path, "r", encoding=input_encoding) as sourceFile, \
+        open(temp_path, "w", encoding=output_encoding) as targetFile:
+        contents = sourceFile.read()
+        targetFile.write(contents)
+    os.remove(file_path)
+    shutil.move(temp_path, file_path)
+
 class XS_stat:
     def __init__(self):
         self.config = _load_config()
         self.raw_dir = self.config["XScript"]["raw_log_dir"]
         self.fixed_dir = self.config["XScript"]["fixed_log_dir"]
         self.concat_dir = self.config["XScript"]["stat_dir"]
+        self.xq_path = self.get_xq_path()
 
     def del_empty(self, input_path, output_path):
-        with open(input_path, "rb") as ef:
-            input_encoding = detect(ef.read())["encoding"]
-
-        temp_path = "{}.tmp".format(input_path)
-        with codecs.open(input_path, "r", input_encoding, errors="ignore") as sourceFile, \
-            codecs.open(temp_path, "w", "utf-8-sig") as targetFile:
-                    contents = sourceFile.read().encode("utf-8").decode("utf-8-sig")
-                    targetFile.write(contents)
-        shutil.move(temp_path, input_path)
+        convert_encoding(input_path, "utf-8-sig")
 
         with open(input_path, "r", encoding="utf-8-sig") as inFile, \
             open(output_path, "w", encoding="utf-8-sig") as outFile:
@@ -73,7 +83,35 @@ class XS_stat:
         df_period["Sum"] = df_period.sum(axis=1)
         df_period[df_period.eq(0)] = np.nan
         df_period = df_period.sort_values(["Sum", "Ticker"], ascending=[False, True])
-        return df_period
+
+        df_period_xq = self.xq_merge(df_period)
+        new_cols = df_period.columns[:2].tolist() + ["產業地位"] + df_period.columns[2:].tolist()
+        df_period_xq = df_period_xq[new_cols]
+        return df_period_xq
+
+    def get_xq_path(self):
+        xq_dir = "./xq"
+        if not os.path.exists(xq_dir):
+            print("沒有xq公司簡介")
+            sys.exit()
+        elif not os.listdir(xq_dir):
+            print("沒有xq公司簡介")
+            sys.exit()
+        else:
+            xq_list = os.listdir(xq_dir)
+            self.xq_date = datetime.strptime(re.search("\d{4}-\d{2}\d{2}", xq_list[-1])[0], "%Y-%m%d").date()
+        xq_list.sort(reverse=False)
+        return "{}/{}".format(xq_dir, xq_list[-1])
+
+    def xq_merge(self, df):
+        convert_encoding(self.xq_path, "utf-8-sig")
+        xq_encoding = get_encoding(self.xq_path)
+        dfxq = pd.read_csv(self.xq_path, encoding=xq_encoding, engine="python")
+        dfxq["代碼"] = dfxq["代碼"].apply(lambda x: "{}{}".format(x, ".TW"))
+        dfxq.drop(labels=["商品"], axis=1, inplace=True)
+        dfx = df.merge(dfxq, left_on="Ticker", right_on="代碼", how="left", indicator=False)
+        dfx.drop(labels=["代碼"], axis=1, inplace=True)
+        return dfx
 
     def process(self):
         start_time = datetime.now().replace(microsecond=0)
